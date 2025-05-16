@@ -1,0 +1,127 @@
+<?xml version="1.0"?>
+<flowgorithm fileversion="4.2">
+  <attributes>
+    <attribute name="name" value="hanging_bar_fem"/>
+    <attribute name="about" value="Assemble stiffness matrix and solve for displacements"/>
+    <attribute name="created" value="2025-05-16"/>
+  </attributes>
+
+  <function name="Main" type="None" variable="">
+    <parameters/>
+    <body>
+      <!-- 1) Inputs -->
+      <declare name="nNodes,nElems" type="Integer" array="False" size=""/>
+      <output expression="&quot;Number of Nodes:&quot;" newline="False"/>
+      <input variable="nNodes"/>
+      <output expression="&quot;Number of Elements:&quot;" newline="False"/>
+      <input variable="nElems"/>
+
+      <declare name="E,A,L" type="Real" array="False" size=""/>
+      <declare name="i" type="Integer" array="False" size=""/>
+      <declare name="K" type="Real" array="True" size="nNodes*nNodes"/>
+      <declare name="F,u" type="Real" array="True" size="nNodes"/>
+      <declare name="elem" type="Integer" array="True" size="nElems*2"/>
+
+      <!-- Initialize global K and load vector F -->
+      <for variable="i" start="1" end="nNodes*nNodes" direction="inc" step="1">
+        <assign variable="K[i-1]" expression="0"/>
+      </for>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <assign variable="F[i-1]" expression="0"/>
+      </for>
+
+      <!-- 2) Element data input -->
+      <for variable="i" start="1" end="nElems" direction="inc" step="1">
+        <output expression="&quot;Element &quot; &amp; i &amp; &quot; start-node:&quot;" newline="False"/>
+        <input variable="elem[(i-1)*2]"/>
+        <output expression="&quot;Element &quot; &amp; i &amp; &quot; end-node:&quot;" newline="False"/>
+        <input variable="elem[(i-1)*2+1]"/>
+        <output expression="&quot;E, A, L for element &quot; &amp; i &amp; &quot;:&quot;" newline="False"/>
+        <input variable="E"/><input variable="A"/><input variable="L"/>
+
+        <!-- 3) Compute local stiffness ke = E*A/L -->
+        <declare name="ke" type="Real" array="False" size=""/>
+        <assign variable="ke" expression="E * A / L"/>
+
+        <!-- 4) Assemble into K -->
+        <declare name="n1,n2,idx" type="Integer" array="False" size=""/>
+        <assign variable="n1" expression="elem[(i-1)*2]"/>
+        <assign variable="n2" expression="elem[(i-1)*2+1]"/>
+        <!-- K[n1,n1] += ke, K[n1,n2] -= ke, etc. -->
+        <assign variable="idx" expression="(n1-1)*nNodes + (n1-1)"/>
+        <assign variable="K[idx]" expression="K[idx] + ke"/>
+        <assign variable="idx" expression="(n1-1)*nNodes + (n2-1)"/>
+        <assign variable="K[idx]" expression="K[idx] - ke"/>
+        <assign variable="idx" expression="(n2-1)*nNodes + (n1-1)"/>
+        <assign variable="K[idx]" expression="K[idx] - ke"/>
+        <assign variable="idx" expression="(n2-1)*nNodes + (n2-1)"/>
+        <assign variable="K[idx]" expression="K[idx] + ke"/>
+      </for>
+
+      <!-- 5) Input loads -->
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <output expression="&quot;Load at node &quot; &amp; i &amp; &quot;:&quot;" newline="False"/>
+        <input variable="F[i-1]"/>
+      </for>
+
+      <!-- 6) Apply boundary: fix node 1 (zero displacement) -->
+      <!-- Zero out row & col 1, set K[1,1]=1 -->
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <assign variable="K[(i-1)*nNodes + 0]" expression="0"/>
+        <assign variable="K[0*nNodes + (i-1)]" expression="0"/>
+      </for>
+      <assign variable="K[0]" expression="1"/>
+      <assign variable="F[0]" expression="0"/>
+
+      <!-- 7) Solve [K]{u} = {F} (Gaussian elimination) -->
+      <call expression="SolveSystem(K, F, u, nNodes)"/>
+
+      <!-- 8) Output displacements -->
+      <output expression="&quot;Nodal Displacements:&quot;" newline="True"/>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <output expression="&quot;u[&quot; &amp; i &amp; &quot;] = &quot; &amp; u[i-1]" newline="True"/>
+      </for>
+    </body>
+  </function>
+
+  <!-- Gaussian elimination routine -->
+  <function name="SolveSystem" type="None" variable="">
+    <parameters>
+      <parameter name="K" type="Real" array="True"/>
+      <parameter name="F" type="Real" array="True"/>
+      <parameter name="u" type="Real" array="True"/>
+      <parameter name="N" type="Integer" array="False"/>
+    </parameters>
+    <body>
+      <declare name="i,j,k" type="Integer" array="False" size=""/>
+      <declare name="factor" type="Real" array="False" size=""/>
+
+      <!-- Forward elimination -->
+      <for variable="k" start="1" end="N-1" direction="inc" step="1">
+        <for variable="i" start="k+1" end="N" direction="inc" step="1">
+          <assign variable="factor" expression="K[(i-1)*N + (k-1)] / K[(k-1)*N + (k-1)]"/>
+          <!-- Row i = Row i - factor * Row k -->
+          <for variable="j" start="k" end="N" direction="inc" step="1">
+            <assign variable="K[(i-1)*N + (j-1)]"
+                    expression="K[(i-1)*N + (j-1)] - factor * K[(k-1)*N + (j-1)]"/>
+          </for>
+          <assign variable="F[i-1]" expression="F[i-1] - factor * F[k-1]"/>
+        </for>
+      </for>
+
+      <!-- Back substitution -->
+      <assign variable="u[N-1]" expression="F[N-1] / K[(N-1)*N + (N-1)]"/>
+      <for variable="i" start="N-1" end="1" direction="dec" step="1">
+        <declare name="sum" type="Real" array="False" size=""/>
+        <assign variable="sum" expression="0"/>
+        <for variable="j" start="i+1" end="N" direction="inc" step="1">
+          <assign variable="sum"
+                  expression="sum + K[(i-1)*N + (j-1)] * u[j-1]"/>
+        </for>
+        <assign variable="u[i-1]"
+                expression="(F[i-1] - sum) / K[(i-1)*N + (i-1)]"/>
+      </for>
+    </body>
+  </function>
+</flowgorithm>
+

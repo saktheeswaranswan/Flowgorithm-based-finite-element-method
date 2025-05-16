@@ -1,0 +1,126 @@
+<?xml version="1.0"?>
+<flowgorithm fileversion="4.2">
+  <attributes>
+    <attribute name="name" value="hanging_bar_export_dynamic"/>
+    <attribute name="about" value="Dynamic FEM export with field inputs"/>
+    <attribute name="created" value="2025-05-16"/>
+  </attributes>
+
+  <function name="Main" type="None" variable="">
+    <parameters/>
+    <body>
+      <!-- Declarations -->
+      <declare name="nNodes,nElems" type="Integer" array="False" size=""/>
+      <declare name="E,A,L,Le,ke,load" type="Real" array="False" size=""/>
+      <declare name="i,j,e" type="Integer" array="False" size=""/>
+      <declare name="factor,sum" type="Real" array="False" size=""/>
+      <declare name="x" type="Real" array="True" size="nNodes"/>
+      <declare name="K" type="Real" array="True" size="nNodes*nNodes"/>
+      <declare name="F,u" type="Real" array="True" size="nNodes"/>
+      <declare name="fileID,idx,n1,n2" type="Integer" array="False" size=""/>
+
+      <!-- 1) User inputs -->
+      <output expression="&quot;Enter total bar length (m): &quot;" newline="False"/>
+      <input variable="L"/>
+      <output expression="&quot;Enter number of elements: &quot;" newline="False"/>
+      <input variable="nElems"/>
+      <assign variable="nNodes" expression="nElems + 1"/>
+      <output expression="&quot;Enter Young's Modulus E (Pa): &quot;" newline="False"/>
+      <input variable="E"/>
+      <output expression="&quot;Enter cross-sectional area A (m^2): &quot;" newline="False"/>
+      <input variable="A"/>
+      <output expression="&quot;Enter point load at free end (N): &quot;" newline="False"/>
+      <input variable="load"/>
+
+      <!-- 2) Derived parameters -->
+      <assign variable="Le" expression="L / nElems"/>
+      <assign variable="ke" expression="E * A / Le"/>
+
+      <!-- 3) Initialize arrays -->
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <assign variable="x[i-1]" expression="(i-1) * Le"/>
+        <assign variable="F[i-1]" expression="0"/>
+        <for variable="j" start="1" end="nNodes" direction="inc" step="1">
+          <assign variable="K[(i-1)*nNodes + (j-1)]" expression="0"/>
+        </for>
+      </for>
+
+      <!-- 4) Assemble stiffness matrix -->
+      <for variable="e" start="1" end="nElems" direction="inc" step="1">
+        <assign variable="n1" expression="e"/>
+        <assign variable="n2" expression="e + 1"/>
+        <assign variable="idx" expression="(n1-1)*nNodes + (n1-1)"/>
+        <assign variable="K[idx]" expression="K[idx] + ke"/>
+        <assign variable="idx" expression="(n1-1)*nNodes + (n2-1)"/>
+        <assign variable="K[idx]" expression="K[idx] - ke"/>
+        <assign variable="idx" expression="(n2-1)*nNodes + (n1-1)"/>
+        <assign variable="K[idx]" expression="K[idx] - ke"/>
+        <assign variable="idx" expression="(n2-1)*nNodes + (n2-1)"/>
+        <assign variable="K[idx]" expression="K[idx] + ke"/>
+      </for>
+
+      <!-- 5) Apply point load -->
+      <assign variable="F[nNodes-1]" expression="load"/>
+
+      <!-- 6) Boundary condition: fix node 1 -->
+      <for variable="j" start="1" end="nNodes" direction="inc" step="1">
+        <assign variable="K[0*nNodes + (j-1)]" expression="0"/>
+        <assign variable="K[(j-1)*nNodes + 0]" expression="0"/>
+      </for>
+      <assign variable="K[0]" expression="1"/>
+      <assign variable="F[0]" expression="0"/>
+
+      <!-- 7) Solve system -->
+      <!-- Forward elimination -->
+      <for variable="i" start="1" end="nNodes-1" direction="inc" step="1">
+        <for variable="j" start="i+1" end="nNodes" direction="inc" step="1">
+          <assign variable="factor" expression="K[(j-1)*nNodes + (i-1)] / K[(i-1)*nNodes + (i-1)]"/>
+          <for variable="e" start="i" end="nNodes" direction="inc" step="1">
+            <assign variable="K[(j-1)*nNodes + (e-1)]"
+                    expression="K[(j-1)*nNodes + (e-1)] - factor * K[(i-1)*nNodes + (e-1)]"/>
+          </for>
+          <assign variable="F[j-1]" expression="F[j-1] - factor * F[i-1]"/>
+        </for>
+      </for>
+      <!-- Back substitution -->
+      <assign variable="u[nNodes-1]" expression="F[nNodes-1] / K[(nNodes-1)*nNodes + (nNodes-1)]"/>
+      <for variable="i" start="nNodes-1" end="1" direction="dec" step="1">
+        <assign variable="sum" expression="0"/>
+        <for variable="j" start="i+1" end="nNodes" direction="inc" step="1">
+          <assign variable="sum"
+                  expression="sum + K[(i-1)*nNodes + (j-1)] * u[j-1]"/>
+        </for>
+        <assign variable="u[i-1]" expression="(F[i-1] - sum) / K[(i-1)*nNodes + (i-1)]"/>
+      </for>
+
+      <!-- 8) Export to TXT -->
+      <open file="output.txt" mode="write" variable="fileID"/>
+      <write file="fileID" expression="&quot;Node Coordinates (m):&quot;" newline="True"/>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <write file="fileID" expression="&quot;Node &quot; &amp; i &amp; &quot;: &quot; &amp; x[i-1]" newline="True"/>
+      </for>
+      <write file="fileID" expression="&quot;\nGlobal Stiffness Matrix (N/m):&quot;" newline="True"/>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <declare name="line" type="String" array="False" size=""/>
+        <assign variable="line" expression="&quot;&quot;"/>
+        <for variable="j" start="1" end="nNodes" direction="inc" step="1">
+          <assign variable="line"
+                  expression="line &amp; String(K[(i-1)*nNodes + (j-1)]) &amp; &quot;\t&quot;"/>
+        </for>
+        <write file="fileID" expression="line" newline="True"/>
+      </for>
+      <write file="fileID" expression="&quot;\nNodal Displacements (m):&quot;" newline="True"/>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <write file="fileID" expression="&quot;u[&quot; &amp; i &amp; &quot;] = &quot; &amp; u[i-1]" newline="True"/>
+      </for>
+      <close file="fileID"/>
+
+      <!-- 9) Display results -->
+      <output expression="&quot;Nodal Displacements (m):&quot;" newline="True"/>
+      <for variable="i" start="1" end="nNodes" direction="inc" step="1">
+        <output expression="&quot;u[&quot; &amp; i &amp; &quot;] = &quot; &amp; u[i-1]" newline="True"/>
+      </for>
+    </body>
+  </function>
+</flowgorithm>
+
